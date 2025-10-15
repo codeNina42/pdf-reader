@@ -1,0 +1,447 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Haunted PDF Reader 👻</title>
+<link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;700&family=Inter:wght@400;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#07080e; --ink:#e9eefc; --muted:#9aa7c6; --acc:#79ffa8; --danger:#ff3b3b; --panel:#0b0f1e;
+    --glass:rgba(255,255,255,.04); --stroke:#1b2548;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{
+    margin:0; background:radial-gradient(1400px 900px at 10% -10%, #121a39 0, transparent 50%),linear-gradient(180deg,#090b14,#05060b 55%,#090b14);
+    color:var(--ink); font:14px/1.55 Inter, system-ui, Segoe UI, Roboto; overflow:hidden;
+  }
+
+  /* ambient fog & scanlines */
+  .fog, .scan {pointer-events:none; position:fixed; inset:0; z-index:0}
+  .fog{background:radial-gradient(closest-side, rgba(163,255,201,.05), transparent 60%) 20% 10%/50% 50% no-repeat,
+                 radial-gradient(closest-side, rgba(121,255,168,.04), transparent 60%) 80% 30%/35% 35% no-repeat;}
+  .scan{background:repeating-linear-gradient(transparent 0 2px, rgba(0,0,0,.25) 2px 3px); mix-blend-mode:soft-light; opacity:.7}
+
+  header{
+    position:relative; z-index:2; display:flex; align-items:center; gap:10px; justify-content:space-between;
+    padding:10px 12px; border-bottom:1px solid var(--stroke); background:linear-gradient(180deg,rgba(255,255,255,.03),rgba(255,255,255,.015));
+    backdrop-filter:blur(8px) saturate(140%);
+  }
+  header .brand{display:flex; align-items:center; gap:10px}
+  .logo{
+    width:28px; height:28px; border-radius:50%; background:radial-gradient(circle at 35% 35%, #79ffa8, #1f7a4f 60%);
+    box-shadow:0 0 20px rgba(121,255,168,.35), inset 0 0 12px rgba(0,0,0,.45);
+    position:relative; overflow:hidden;
+  }
+  .logo:after{content:""; position:absolute; inset:6px; border-radius:50%; border:2px solid rgba(0,0,0,.5); box-shadow:inset 0 0 8px rgba(0,0,0,.6)}
+  h1{margin:0; font:700 16px/1 Cinzel, serif; letter-spacing:.6px}
+
+  .bar{display:flex; flex-wrap:wrap; gap:8px}
+  input, button, select{
+    background:#0e1430; color:var(--ink); border:1px solid #2a3a66; border-radius:12px; padding:8px 10px; font:inherit;
+  }
+  input[type="number"]{width:72px}
+  button{background:var(--acc); color:#02100a; border:0; font-weight:700; cursor:pointer}
+  button.ghost{background:#0e1430; color:var(--ink); border:1px solid #2a3a66}
+  .danger{background:var(--danger); color:white}
+  .pill{font-size:12px; color:var(--muted)}
+  .sep{width:1px; height:28px; background:#1f2c55; margin:0 6px}
+
+  .wrap{
+    position:relative; z-index:1; display:grid; grid-template-columns:280px 1fr; gap:12px; padding:12px;
+    height:calc(100% - 54px);
+  }
+  aside{
+    background:var(--glass); border:1px solid var(--stroke); border-radius:16px; padding:10px; overflow:auto; min-height:0;
+  }
+  main{
+    background:var(--glass); border:1px solid var(--stroke); border-radius:16px; overflow:hidden; display:flex; flex-direction:column; min-height:0;
+  }
+
+  /* drop zone */
+  .drop{
+    border:1px dashed #33467a; border-radius:14px; padding:10px; text-align:center; color:var(--muted); margin-bottom:10px;
+    background:rgba(255,255,255,.02);
+  }
+  .drop.drag{border-color:#79ffa8; color:#79ffa8; box-shadow:0 0 0 2px rgba(121,255,168,.2) inset}
+
+  /* thumbs */
+  #thumbs{display:flex; flex-direction:column; gap:8px}
+  .thumb{display:flex; gap:8px; align-items:center; padding:6px; border:1px solid #273665; border-radius:10px; background:rgba(255,255,255,.02); cursor:pointer}
+  .thumb.active{outline:2px solid var(--acc)}
+  .thumb canvas{width:48px; height:auto; background:#000; border-radius:6px}
+  .thumb .meta{font-size:12px; color:#cfe2ff}
+
+  /* viewer */
+  .viewer{position:relative; flex:1; overflow:auto; background:radial-gradient(800px 300px at 50% -10%, rgba(121,255,168,.06), transparent 60%)}
+  .page{display:flex; justify-content:center; padding:20px}
+  canvas.pageCanvas{background:#0a0a0a; box-shadow:0 18px 60px rgba(0,0,0,.65), 0 0 0 1px rgba(255,255,255,.06) inset; border-radius:10px}
+
+  /* haunted glitch on hover */
+  .glitch:hover{filter:hue-rotate(-10deg) saturate(120%); transform:translateY(-1px); transition:.2s}
+  /* tiny flicker for the title */
+  @keyframes flicker{0%,100%{opacity:.9} 10%{opacity:.8} 20%{opacity:1} 30%{opacity:.7} 40%{opacity:.95} 50%{opacity:.85} 60%{opacity:1} 70%{opacity:.75} 80%{opacity:.92} 90%{opacity:.83}}
+  h1{animation:flicker 5s infinite;}
+
+  /* top controls row inside main */
+  .controls{display:flex; align-items:center; gap:8px; padding:8px; border-bottom:1px solid var(--stroke); background:linear-gradient(180deg,rgba(255,255,255,.02),rgba(255,255,255,.015))}
+  .controls .right{margin-left:auto; display:flex; gap:8px; align-items:center}
+
+  /* search highlight (simple overlay) */
+  mark{background:rgba(121,255,168,.25); outline:1px solid rgba(121,255,168,.6); color:#eafff1}
+</style>
+</head>
+<body>
+<div class="fog"></div><div class="scan"></div>
+
+<header>
+  <div class="brand">
+    <div class="logo"></div>
+    <h1>Haunted PDF Reader</h1>
+    <span class="pill" id="status">idle</span>
+  </div>
+  <div class="bar">
+    <input id="urlInput" placeholder="Open by URL (https://… .pdf)" style="min-width:280px">
+    <button class="ghost glitch" id="openUrl">Open URL</button>
+    <label class="ghost glitch" style="display:inline-flex;align-items:center;gap:8px;padding:8px 12px;cursor:pointer">
+      <input id="fileInput" type="file" accept="application/pdf" style="display:none">Open File
+    </label>
+    <span class="sep"></span>
+    <button class="ghost" id="prevBtn">‹ Prev</button>
+    <button class="ghost" id="nextBtn">Next ›</button>
+    <input id="pageNum" type="number" min="1" value="1">
+    <span class="pill">/ <span id="pageCount">0</span></span>
+    <span class="sep"></span>
+    <button class="ghost" id="zoomOut">−</button>
+    <button class="ghost" id="zoomIn">+</button>
+    <button class="ghost" id="fitWidth">Fit</button>
+    <span class="sep"></span>
+    <input id="findBox" placeholder="Find text…" style="min-width:160px">
+    <button class="ghost" id="findNext">Find ▶</button>
+  </div>
+</header>
+
+<div class="wrap">
+  <aside>
+    <div id="drop" class="drop">Drag & drop a PDF here…<br><span class="pill">or use Open File / URL</span></div>
+    <div class="group">
+      <h3>Thumbnails</h3>
+      <div id="thumbs"></div>
+    </div>
+    <div class="group">
+      <h3>Ambience</h3>
+      <button class="ghost" id="ambienceBtn">Enable Eerie Ambience</button>
+      <p class="pill">low whoosh + distant chime • toggle anytime</p>
+    </div>
+  </aside>
+
+  <main>
+    <div class="controls">
+      <div class="pill">Tip: scroll to explore. Thumbs to jump. Fit for wide pages.</div>
+      <div class="right">
+        <button class="danger" id="clearBtn">Clear</button>
+      </div>
+    </div>
+    <div class="viewer" id="viewer"></div>
+  </main>
+</div>
+
+<!-- PDF.js (legacy UMD) -->
+<script src="https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js"></script>
+<script>
+(() => {
+  // ====== PDF.js setup ======
+  const pdfjsLib = window['pdfjs-dist/build/pdf'];
+  pdfjsLib.GlobalWorkerOptions.workerSrc =
+    "https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js";
+
+  // ====== Elements ======
+  const status = el('#status');
+  const viewer = el('#viewer');
+  const pageNum = el('#pageNum');
+  const pageCount = el('#pageCount');
+  const prevBtn = el('#prevBtn');
+  const nextBtn = el('#nextBtn');
+  const zoomIn = el('#zoomIn');
+  const zoomOut = el('#zoomOut');
+  const fitWidth = el('#fitWidth');
+  const fileInput = el('#fileInput');
+  const urlInput = el('#urlInput');
+  const openUrl = el('#openUrl');
+  const thumbs = el('#thumbs');
+  const drop = el('#drop');
+  const clearBtn = el('#clearBtn');
+  const findBox = el('#findBox');
+  const findNext = el('#findNext');
+  const ambienceBtn = el('#ambienceBtn');
+
+  // ====== State ======
+  let pdfDoc = null;
+  let scale = 1.15;
+  let pagesRendered = 0;
+  let currentPage = 1;
+  let fitToWidth = false;
+  let searchQuery = '';
+  let lastSearchPage = 0;
+
+  // ====== Utils ======
+  function el(s) { return document.querySelector(s); }
+  function setStatus(t){ status.textContent = t; }
+  function clamp(n,a,b){ return Math.max(a, Math.min(b, n)); }
+  function clearViewer(){ viewer.innerHTML=''; thumbs.innerHTML=''; pageCount.textContent='0'; pageNum.value=1; currentPage=1; pagesRendered=0; }
+
+  // ====== Loaders ======
+  async function loadPdfFromUrl(url){
+    setStatus('loading…');
+    clearViewer();
+    try{
+      const loadingTask = pdfjsLib.getDocument({ url, withCredentials: false, cMapUrl: 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/cmaps/', cMapPacked: true });
+      pdfDoc = await loadingTask.promise;
+      pageCount.textContent = pdfDoc.numPages;
+      setStatus('rendering…');
+      await renderAll();
+      setStatus('ready');
+    }catch(e){ console.error(e); setStatus('error'); alert('Failed to load PDF'); }
+  }
+  async function loadPdfFromFile(file){
+    const buf = await file.arrayBuffer();
+    setStatus('loading…');
+    clearViewer();
+    try{
+      const loadingTask = pdfjsLib.getDocument({ data: buf, cMapUrl: 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/cmaps/', cMapPacked: true });
+      pdfDoc = await loadingTask.promise;
+      pageCount.textContent = pdfDoc.numPages;
+      setStatus('rendering…');
+      await renderAll();
+      setStatus('ready');
+    }catch(e){ console.error(e); setStatus('error'); alert('Failed to open file'); }
+  }
+
+  // ====== Render ======
+  async function renderAll(){
+    thumbs.innerHTML = '';
+    for(let p=1; p<=pdfDoc.numPages; p++){
+      // page container
+      const wrap = document.createElement('div');
+      wrap.className = 'page';
+      wrap.dataset.page = p;
+      const canvas = document.createElement('canvas');
+      canvas.className = 'pageCanvas glitch';
+      wrap.appendChild(canvas);
+      viewer.appendChild(wrap);
+
+      // thumbnail
+      const tdiv = document.createElement('div');
+      tdiv.className = 'thumb';
+      const tcv = document.createElement('canvas');
+      const meta = document.createElement('div');
+      meta.className = 'meta';
+      meta.textContent = 'Page '+p;
+      tdiv.appendChild(tcv); tdiv.appendChild(meta);
+      tdiv.onclick = ()=> scrollToPage(p);
+      thumbs.appendChild(tdiv);
+
+      // render main page
+      const page = await pdfDoc.getPage(p);
+      const viewport = page.getViewport({ scale });
+      const ctx = canvas.getContext('2d');
+      if (fitToWidth) {
+        const vw = viewer.clientWidth - 40; // padding
+        const s = vw / viewport.width;
+        const fittedViewport = page.getViewport({ scale: scale * s });
+        canvas.width = fittedViewport.width | 0;
+        canvas.height = fittedViewport.height | 0;
+        await page.render({ canvasContext: ctx, viewport: fittedViewport }).promise;
+      } else {
+        canvas.width = viewport.width | 0;
+        canvas.height = viewport.height | 0;
+        await page.render({ canvasContext: ctx, viewport }).promise;
+      }
+
+      // render thumbnail smaller
+      const tscale = 120 / viewport.width;
+      const tvp = page.getViewport({ scale: tscale });
+      tcv.width = tvp.width | 0; tcv.height = tvp.height | 0;
+      await page.render({ canvasContext: tcv.getContext('2d'), viewport: tvp }).promise;
+
+      pagesRendered++;
+    }
+    highlightActiveThumb(1);
+    observer.observe(viewer); // start intersection observer after first render
+  }
+
+  function scrollToPage(p){
+    const node = viewer.querySelector(`.page[data-page="${p}"]`);
+    if(node){ node.scrollIntoView({ behavior:'smooth', block:'start' }); }
+  }
+
+  function highlightActiveThumb(p){
+    document.querySelectorAll('.thumb').forEach((x,i)=>{
+      x.classList.toggle('active', (i+1)===p);
+    });
+  }
+
+  // ====== Navigation ======
+  prevBtn.onclick = ()=> { pageNum.value = clamp(Number(pageNum.value)-1, 1, Number(pageCount.textContent)); jump(); }
+  nextBtn.onclick = ()=> { pageNum.value = clamp(Number(pageNum.value)+1, 1, Number(pageCount.textContent)); jump(); }
+  pageNum.onchange = jump;
+
+  function jump(){
+    const p = clamp(Number(pageNum.value||1), 1, Number(pageCount.textContent||1));
+    scrollToPage(p);
+  }
+
+  // track visible page with IntersectionObserver
+  const observer = new IntersectionObserver((entries)=>{
+    let topMost = null;
+    entries.forEach(e=>{
+      if(e.isIntersecting){
+        if(!topMost || e.boundingClientRect.top < topMost.boundingClientRect.top) topMost = e;
+      }
+    });
+    if(topMost){
+      const p = Number(topMost.target.dataset.page);
+      currentPage = p; pageNum.value = p; highlightActiveThumb(p);
+    }
+  }, { root: viewer, threshold:[0.01, 0.25, 0.5, 0.75] });
+
+  // ====== Zoom / Fit ======
+  zoomIn.onclick = async ()=>{ scale = Math.min(5, scale+0.15); fitToWidth=false; await rerenderVisible(); };
+  zoomOut.onclick = async ()=>{ scale = Math.max(0.2, scale-0.15); fitToWidth=false; await rerenderVisible(); };
+  fitWidth.onclick = async ()=>{ fitToWidth = true; await rerenderVisible(); };
+
+  async function rerenderVisible(){
+    setStatus('updating…');
+    // re-render only currently visible pages for speed
+    const pages = Array.from(viewer.querySelectorAll('.page'));
+    for(const wrap of pages){
+      const rect = wrap.getBoundingClientRect();
+      const root = viewer.getBoundingClientRect();
+      const mostlyVisible = rect.top < root.bottom && rect.bottom > root.top;
+      if(!mostlyVisible) continue;
+
+      const p = Number(wrap.dataset.page);
+      const canvas = wrap.querySelector('canvas');
+      const ctx = canvas.getContext('2d');
+      const page = await pdfDoc.getPage(p);
+      const vp = page.getViewport({ scale });
+      if (fitToWidth) {
+        const vw = viewer.clientWidth - 40;
+        const s = vw / vp.width;
+        const fitted = page.getViewport({ scale: scale * s });
+        canvas.width = fitted.width | 0; canvas.height = fitted.height | 0;
+        await page.render({ canvasContext: ctx, viewport: fitted }).promise;
+      } else {
+        canvas.width = vp.width | 0; canvas.height = vp.height | 0;
+        await page.render({ canvasContext: ctx, viewport: vp }).promise;
+      }
+    }
+    setStatus('ready');
+  }
+
+  // ====== Quick Find (simple per-page text search, next match) ======
+  findNext.onclick = async ()=>{
+    if(!pdfDoc) return;
+    const q = findBox.value.trim();
+    if(!q) return;
+    if(q !== searchQuery){ searchQuery = q; lastSearchPage = currentPage-1; }
+    for(let i=1; i<=pdfDoc.numPages; i++){
+      const p = ((lastSearchPage + i) % pdfDoc.numPages) + 1;
+      const page = await pdfDoc.getPage(p);
+      const text = await page.getTextContent();
+      const str = text.items.map(it=>it.str).join(' ');
+      if(str.toLowerCase().includes(q.toLowerCase())){
+        lastSearchPage = p-1;
+        pageNum.value = p; scrollToPage(p);
+        flashFound(p);
+        return;
+      }
+    }
+    // not found
+    shakeHeader();
+  };
+  function flashFound(p){
+    const wrap = viewer.querySelector(`.page[data-page="${p}"] .pageCanvas`);
+    if(!wrap) return;
+    wrap.style.boxShadow = '0 0 0 2px rgba(121,255,168,.8), 0 24px 80px rgba(0,0,0,.6)';
+    setTimeout(()=> wrap.style.boxShadow = '0 18px 60px rgba(0,0,0,.65), 0 0 0 1px rgba(255,255,255,.06) inset', 450);
+  }
+  function shakeHeader(){
+    const h = document.querySelector('header'); h.style.transform='translateX(-3px)'; setTimeout(()=>h.style.transform='',120);
+  }
+
+  // ====== Drag & Drop ======
+  ;['dragenter','dragover'].forEach(evt=>{
+    drop.addEventListener(evt,(e)=>{e.preventDefault(); e.stopPropagation(); drop.classList.add('drag');});
+  });
+  ;['dragleave','drop'].forEach(evt=>{
+    drop.addEventListener(evt,(e)=>{e.preventDefault(); e.stopPropagation(); drop.classList.remove('drag');});
+  });
+  drop.addEventListener('drop', (e)=>{
+    const f = e.dataTransfer.files?.[0];
+    if(f && f.type==='application/pdf'){ loadPdfFromFile(f); }
+  });
+
+  // ====== Buttons / Inputs ======
+  fileInput.onchange = ()=> { const f = fileInput.files?.[0]; if(f) loadPdfFromFile(f); };
+  openUrl.onclick = ()=> { const u = urlInput.value.trim(); if(u) loadPdfFromUrl(u); };
+  clearBtn.onclick = ()=> { pdfDoc=null; clearViewer(); setStatus('cleared'); };
+
+  // ====== Eerie ambience (WebAudio, toggle) ======
+  let audioCtx=null, ambNodes=null, ambEnabled=false;
+  ambienceBtn.onclick = ()=> {
+    if(!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    ambEnabled = !ambEnabled;
+    if(ambEnabled){ startAmbience(); ambienceBtn.textContent='Disable Ambience'; }
+    else { stopAmbience(); ambienceBtn.textContent='Enable Eerie Ambience'; }
+  };
+  function startAmbience(){
+    if(!audioCtx) return;
+    const ctx = audioCtx;
+    // wind-ish noise
+    const noiseBuf = ctx.createBuffer(1, ctx.sampleRate*2, ctx.sampleRate);
+    const data = noiseBuf.getChannelData(0);
+    for(let i=0;i<data.length;i++){ data[i]=(Math.random()*2-1)*0.4; }
+    const noiseSrc = ctx.createBufferSource(); noiseSrc.buffer=noiseBuf; noiseSrc.loop=true;
+    const bp = ctx.createBiquadFilter(); bp.type='bandpass'; bp.frequency.value=220; bp.Q.value=0.6;
+    const g = ctx.createGain(); g.gain.value = 0.05;
+    noiseSrc.connect(bp); bp.connect(g); g.connect(ctx.destination);
+    noiseSrc.start();
+
+    // distant chime (slow, subtle)
+    const o = ctx.createOscillator(); o.type='sine'; o.frequency.value=440;
+    const og = ctx.createGain(); og.gain.value=0.0;
+    o.connect(og); og.connect(ctx.destination); o.start();
+    const loop = setInterval(()=>{
+      const now = ctx.currentTime;
+      o.frequency.setValueAtTime(320 + Math.random()*120, now);
+      og.gain.cancelScheduledValues(now);
+      og.gain.setValueAtTime(0.0, now);
+      og.gain.linearRampToValueAtTime(0.02, now+0.1);
+      og.gain.exponentialRampToValueAtTime(0.0001, now+2.2);
+    }, 4000);
+
+    ambNodes = {noiseSrc, g, o, og, loop};
+  }
+  function stopAmbience(){
+    if(!audioCtx || !ambNodes) return;
+    try{ ambNodes.noiseSrc.stop(); }catch{}
+    clearInterval(ambNodes.loop);
+    ambNodes=null;
+  }
+
+  // ====== Keyboard shortcuts ======
+  window.addEventListener('keydown', (e)=>{
+    if(e.target.matches('input,textarea')) return;
+    if(e.key==='ArrowRight') nextBtn.click();
+    if(e.key==='ArrowLeft') prevBtn.click();
+    if(e.key==='+') zoomIn.click();
+    if(e.key==='-') zoomOut.click();
+    if(e.key==='f') fitWidth.click();
+  });
+
+})();
+</script>
+</body>
+</html>
